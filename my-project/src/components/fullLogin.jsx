@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useUser } from '../context/UserContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';  // ✅ Added useLocation
 
 export default function FullLogin({ onLoginSuccess }) {
   const [isSignup, setIsSignup] = useState(false);
@@ -10,9 +10,24 @@ export default function FullLogin({ onLoginSuccess }) {
   const [password, setPassword] = useState('');
   const [contact, setContact] = useState('');
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');  // ✅ Added info message
   const [loading, setLoading] = useState(false);
   const { updateUser } = useUser();
   const navigate = useNavigate();
+  const location = useLocation();  // ✅ Added location
+
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    if (queryParams.get('verifyFirst') === 'true') {
+      setInfoMessage('⚠️ Please verify your email. We have sent a verification link to your email address.');
+    }
+    if (queryParams.get('verified') === 'true') {
+      setInfoMessage('✅ Your email has been successfully verified. Please log in.');
+    }
+    if (queryParams.get('error')) {
+      setInfoMessage('❌ Google authentication failed. Please try again.');
+    }
+  }, [location]);
 
   const validateInputs = () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,47 +59,42 @@ export default function FullLogin({ onLoginSuccess }) {
   };
 
   const handleSubmit = async (e) => {
-  e.preventDefault();
-  setError('');
+    e.preventDefault();
+    setError('');
+    if (!validateInputs()) return;
+    setLoading(true);
 
-  if (!validateInputs()) return;
+    try {
+      const url = isSignup
+        ? 'http://localhost:3001/api/auth/register'
+        : 'http://localhost:3001/api/auth/login';
 
-  setLoading(true);
+      const payload = isSignup
+        ? { name, email, password, contact }
+        : { email, password };
 
-  try {
-    const url = isSignup
-      ? 'http://localhost:3001/api/auth/register'
-      : 'http://localhost:3001/api/auth/login';
+      const response = await axios.post(url, payload);
 
-    const payload = isSignup
-      ? { name, email, password, contact }
-      : { email, password };
+      if (isSignup) {
+        alert('✅ Registration successful! Please check your email and verify before logging in.');
+        setIsSignup(false);
+      } else {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('name', response?.data?.user?.name || 'User');
+        localStorage.setItem('email', response?.data?.user?.email || '');
 
-    const response = await axios.post(url, payload);
+        updateUser(response?.data?.user?.name || 'User', response?.data?.user?.email || '');
 
-    if (isSignup) {
-      alert('✅ Registration successful! Please check your email and verify before logging in.');
-      setIsSignup(false);
-    } else {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('name', response?.data?.user?.name || 'User');
-      localStorage.setItem('email', response?.data?.user?.email || '');
+        onLoginSuccess();
+        navigate('/dashboard', { replace: true });
+      }
 
-      updateUser(response?.data?.user?.name || 'User', response?.data?.user?.email || '');
-
-      onLoginSuccess();
-
-      // ✅ Navigate to dashboard immediately after successful login
-      navigate('/dashboard', { replace: true });
+    } catch (err) {
+      setError(err.response?.data?.message || `${isSignup ? 'Signup' : 'Login'} failed`);
     }
 
-  } catch (err) {
-    setError(err.response?.data?.message || `${isSignup ? 'Signup' : 'Login'} failed`);
-  }
-
-  setLoading(false);
-};
-
+    setLoading(false);
+  };
 
   return (
     <div className="bg-white text-black p-8 rounded shadow w-full max-w-2xl grid md:grid-cols-2 gap-8">
@@ -116,6 +126,12 @@ export default function FullLogin({ onLoginSuccess }) {
         <h2 className="text-lg font-semibold mb-4">
           {isSignup ? 'Sign up with your details' : 'Sign in with your email and password'}
         </h2>
+
+        {infoMessage && (
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 p-2 rounded mb-2 text-sm">
+            {infoMessage}
+          </div>
+        )}
 
         {isSignup && (
           <>

@@ -24,16 +24,54 @@ router.get('/test', (req, res) => {
 });
 
 // ✅ GOOGLE LOGIN
+// ✅ GOOGLE LOGIN with Verification
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 router.get('/google/callback',
   passport.authenticate('google', { failureRedirect: '/login', session: false }),
-  (req, res) => {
-    const token = jwt.sign({ id: req.user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    const redirectUrl = `http://localhost:3000/google-continue?token=${token}&name=${encodeURIComponent(req.user.name)}&email=${req.user.email}`;
-    res.redirect(redirectUrl);
+  async (req, res) => {
+    try {
+      let user = await User.findOne({ email: req.user.email });
+
+      // If user doesn't exist, create one
+      if (!user) {
+        user = new User({
+          name: req.user.name,
+          email: req.user.email,
+          password: '', // No password for Google users
+          isVerified: false,
+        });
+        await user.save();
+      }
+
+      // ✅ If user not verified, send verification email
+      if (!user.isVerified) {
+        const verificationToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+        const verificationLink = `http://localhost:3001/api/auth/verify-email?token=${verificationToken}`;
+
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: user.email,
+          subject: 'Verify your email for Google login',
+          html: `<p>Hi ${user.name},</p>
+                 <p>Please verify your email by clicking <a href="${verificationLink}">here</a>.</p>`,
+        });
+
+        return res.redirect('http://localhost:3000/login?verifyFirst=true');
+      }
+
+      // ✅ If verified, generate token and redirect
+      const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+      const redirectUrl = `http://localhost:3000/google-continue?token=${token}&name=${encodeURIComponent(user.name)}&email=${user.email}`;
+      res.redirect(redirectUrl);
+
+    } catch (err) {
+      console.error('Google callback error:', err);
+      res.redirect('http://localhost:3000/login?error=GoogleAuthFailed');
+    }
   }
 );
+
 
 // ✅ REGISTER WITH EMAIL VERIFICATION
 router.post('/register', async (req, res) => {
